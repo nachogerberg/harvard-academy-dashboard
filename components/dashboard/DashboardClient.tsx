@@ -6,8 +6,6 @@ import {
   ResponsiveContainer, ReferenceLine,
 } from 'recharts'
 import StatCard from './StatCard'
-import FunnelChart from './FunnelChart'
-import CampaignTable from './CampaignTable'
 import AttributionTable from './AttributionTable'
 import DateFilter, { FilterState, getInitialFilter, presetToRange } from './DateFilter'
 
@@ -189,8 +187,6 @@ export default function DashboardClient({
   }
 
   const costPerClosed = pipeline.closed > 0 ? summary.spend / pipeline.closed : 0
-  const closeRate = pipeline.total > 0 ? (pipeline.closed / pipeline.total) * 100 : 0
-  const ctr = summary.impressions > 0 ? (summary.clicks / summary.impressions) * 100 : 0
 
   // Date range label for display
   const rangeLabel = (() => {
@@ -264,6 +260,14 @@ export default function DashboardClient({
         />
       </div>
 
+      {/* Attribution table (Meta × GHL) */}
+      <div className="mb-6">
+        <h2 className="text-sm font-semibold uppercase tracking-widest text-gray-400 mb-4">
+          Meta × GHL Attribution
+        </h2>
+        <AttributionTable data={attribution.campaigns} bestAdId={attribution.bestAdId} />
+      </div>
+
       {/* Leads Daily Timeline Chart */}
       <div className="mb-6 rounded-xl border border-gray-800 bg-gray-900/60 p-6">
         <div className="flex items-center justify-between mb-5">
@@ -318,20 +322,6 @@ export default function DashboardClient({
             </LineChart>
           </ResponsiveContainer>
         )}
-      </div>
-
-      {/* Funnel + Campaign Table */}
-      <div className="mb-6 grid gap-6 lg:grid-cols-2">
-        <FunnelChart data={pipeline.funnel} />
-        <CampaignTable data={campaigns} />
-      </div>
-
-      {/* Attribution table */}
-      <div className="mt-6">
-        <h2 className="text-sm font-semibold uppercase tracking-widest text-gray-400 mb-4">
-          Meta × GHL Attribution
-        </h2>
-        <AttributionTable data={attribution.campaigns} bestAdId={attribution.bestAdId} />
       </div>
 
       <p className="mt-8 text-center text-xs text-gray-700">
