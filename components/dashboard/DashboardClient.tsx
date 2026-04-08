@@ -1,10 +1,13 @@
 'use client'
 
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useEffect } from 'react'
+import {
+  LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip,
+  ResponsiveContainer, ReferenceLine,
+} from 'recharts'
 import StatCard from './StatCard'
 import FunnelChart from './FunnelChart'
 import CampaignTable from './CampaignTable'
-
 import AttributionTable from './AttributionTable'
 import DateFilter, { FilterState, getInitialFilter, presetToRange } from './DateFilter'
 
@@ -38,9 +41,51 @@ interface Campaign {
   cpl: number
 }
 
+interface TimelinePoint {
+  date: string
+  leads: number
+  spend: number
+  clicks: number
+  impressions: number
+  cpl: number
+}
 
 function fmt$(n: number) {
   return '$' + n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+}
+
+function cplDotColor(cpl: number): string {
+  if (cpl <= 0) return '#6b7280'
+  if (cpl <= 30) return '#22c55e'
+  if (cpl <= 60) return '#facc15'
+  return '#f87171'
+}
+
+function cplColorClass(cpl: number): string {
+  if (!cpl || cpl === 0) return 'text-white'
+  if (cpl <= 30) return 'text-green-400'
+  if (cpl <= 60) return 'text-yellow-400'
+  return 'text-red-400'
+}
+
+function fmtDate(d: string) {
+  const [, m, day] = d.split('-')
+  return `${parseInt(m)}/${parseInt(day)}`
+}
+
+function TimelineTooltip({ active, payload, label }: any) {
+  if (!active || !payload?.length) return null
+  const d = payload[0]?.payload as TimelinePoint
+  return (
+    <div className="rounded-lg border border-gray-700 bg-gray-900 p-3 shadow-xl text-xs space-y-1">
+      <div className="font-semibold text-white mb-1">{label}</div>
+      <div className="flex gap-3">
+        <div><span className="text-gray-400">Leads</span> <span className="text-white font-bold ml-1">{d?.leads}</span></div>
+        <div><span className="text-gray-400">CPL</span> <span className={`font-bold ml-1 ${cplColorClass(d?.cpl)}`}>{d?.cpl > 0 ? fmt$(d.cpl) : '—'}</span></div>
+        <div><span className="text-gray-400">Spend</span> <span className="text-white ml-1">{fmt$(d?.spend || 0)}</span></div>
+      </div>
+    </div>
+  )
 }
 
 // Convert our FilterState to Meta API preset string
@@ -84,7 +129,22 @@ export default function DashboardClient({
   const [attribution, setAttribution] = useState<AttributionData>(
     initialAttribution ?? { campaigns: [] }
   )
+  const [timeline, setTimeline] = useState<TimelinePoint[]>([])
+  const [timelineLoading, setTimelineLoading] = useState(true)
   const [lastUpdated, setLastUpdated] = useState(new Date())
+
+  const fetchTimeline = useCallback(async (startDate: string, endDate: string) => {
+    setTimelineLoading(true)
+    try {
+      const res = await fetch(`/api/meta/timeline?start=${startDate.slice(0, 10)}&end=${endDate.slice(0, 10)}`)
+      const d = await res.json()
+      setTimeline(d.timeline || [])
+    } catch {
+      setTimeline([])
+    } finally {
+      setTimelineLoading(false)
+    }
+  }, [])
 
   const fetchAll = useCallback(async (f: FilterState) => {
     setLoading(true)
@@ -108,13 +168,20 @@ export default function DashboardClient({
       setCampaigns(camp)
       setPipeline(pipe)
       if (attr && !attr.error) setAttribution(attr)
+      fetchTimeline(startDate, endDate)
       setLastUpdated(new Date())
     } catch (e: any) {
       setApiError(e.message ?? 'Unknown error')
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [fetchTimeline])
+
+  // Load timeline on mount with default range
+  useEffect(() => {
+    const { startDate, endDate } = getInitialFilter().range
+    fetchTimeline(startDate, endDate)
+  }, [fetchTimeline])
 
   const handleFilterChange = (f: FilterState) => {
     setFilter(f)
@@ -197,32 +264,60 @@ export default function DashboardClient({
         />
       </div>
 
-      {/* Secondary KPIs */}
-      <div className="mb-6 grid grid-cols-2 gap-4 lg:grid-cols-4">
-        <StatCard
-          title="Impressions"
-          value={summary.impressions.toLocaleString()}
-          sub={`CTR: ${ctr.toFixed(2)}%`}
-          color="blue"
-        />
-        <StatCard
-          title="Clicks"
-          value={summary.clicks.toLocaleString()}
-          sub="Link clicks"
-          color="purple"
-        />
-        <StatCard
-          title="Qualification Rate"
-          value={`${pipeline.qualificationRate.toFixed(1)}%`}
-          sub={`${pipeline.total} total opps`}
-          color="yellow"
-        />
-        <StatCard
-          title="Not Qualified"
-          value={pipeline.funnel.find((s) => s.name === 'Not Qualified')?.count ?? 0}
-          sub={`Close rate: ${closeRate.toFixed(1)}%`}
-          color="red"
-        />
+      {/* Leads Daily Timeline Chart */}
+      <div className="mb-6 rounded-xl border border-gray-800 bg-gray-900/60 p-6">
+        <div className="flex items-center justify-between mb-5">
+          <div>
+            <h2 className="text-sm font-semibold uppercase tracking-widest text-gray-400">Leads por día</h2>
+            <p className="text-xs text-gray-500 mt-1">
+              Eje Y: leads · Punto: CPL
+              <span className="ml-3 inline-flex items-center gap-2">
+                <span className="inline-block w-2 h-2 rounded-full bg-green-400" /> ≤$30
+                <span className="inline-block w-2 h-2 rounded-full bg-yellow-400 ml-1" /> $30–60
+                <span className="inline-block w-2 h-2 rounded-full bg-red-400 ml-1" /> &gt;$60
+              </span>
+            </p>
+          </div>
+        </div>
+        {timelineLoading ? (
+          <div className="h-48 flex items-center justify-center text-gray-500 text-sm animate-pulse">Cargando datos...</div>
+        ) : timeline.length === 0 ? (
+          <div className="h-48 flex items-center justify-center text-gray-500 text-sm">Sin datos para este período.</div>
+        ) : (
+          <ResponsiveContainer width="100%" height={220}>
+            <LineChart data={timeline} margin={{ top: 24, right: 16, left: -10, bottom: 0 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#1f2937" />
+              <XAxis
+                dataKey="date"
+                tickFormatter={(v) => { const [, m, day] = v.split('-'); return `${parseInt(m)}/${parseInt(day)}` }}
+                tick={{ fill: '#6b7280', fontSize: 11 }}
+                axisLine={{ stroke: '#1f2937' }}
+                tickLine={false}
+                interval="preserveStartEnd"
+              />
+              <YAxis
+                tick={{ fill: '#6b7280', fontSize: 11 }}
+                axisLine={false}
+                tickLine={false}
+                allowDecimals={false}
+              />
+              <Tooltip content={<TimelineTooltip />} />
+              <ReferenceLine y={0} stroke="#1f2937" />
+              <Line
+                type="monotone"
+                dataKey="leads"
+                stroke="#22c55e"
+                strokeWidth={2}
+                dot={(props: any) => {
+                  const { cx, cy, payload } = props
+                  const color = cplDotColor(payload?.cpl || 0)
+                  return <circle key={`dot-${payload.date}`} cx={cx} cy={cy} r={4} fill={color} stroke="#030712" strokeWidth={1.5} />
+                }}
+                activeDot={{ r: 6, fill: '#22c55e' }}
+              />
+            </LineChart>
+          </ResponsiveContainer>
+        )}
       </div>
 
       {/* Funnel + Campaign Table */}
